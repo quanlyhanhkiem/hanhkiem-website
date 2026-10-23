@@ -39,25 +39,13 @@
     const cls = $('#teamClassFilter')?.value || 'all';
     const activeClass = cls === 'all' ? '' : cls;
     const selectedWeek = Math.min(35, Math.max(1, Number(uiState().teamWeek)||1));
-    const teams = teamsFor(activeClass).slice().sort((a,b) => {
-      // Sắp xếp theo thứ tự tên tổ (Tổ 1, Tổ 2, Tổ 10), không theo điểm.
-      const byName = a.name.localeCompare(b.name, 'vi', {numeric:true, sensitivity:'base'});
-      return byName || a.className.localeCompare(b.className, 'vi', {numeric:true, sensitivity:'base'});
-    });
+    const teams = teamsFor(activeClass).slice().sort((a,b)=>teamScore(b, selectedWeek)-teamScore(a, selectedWeek));
     const allClasses = classes();
-    const teamOrder = new Map(teams.map((t, i) => [t.id, i]));
-    const students = studentsFor(activeClass).slice().sort((a,b) => {
-      const teamA = data().teams.find(t => t.className === a.className && (t.studentIds || []).includes(a.id));
-      const teamB = data().teams.find(t => t.className === b.className && (t.studentIds || []).includes(b.id));
-      const classOrder = a.className.localeCompare(b.className, 'vi', {numeric:true, sensitivity:'base'});
-      if (classOrder) return classOrder;
-      const orderA = teamA ? teamOrder.get(teamA.id) ?? 9999 : 9999;
-      const orderB = teamB ? teamOrder.get(teamB.id) ?? 9999 : 9999;
-      return orderA - orderB || (!teamA ? 1 : 0) - (!teamB ? 1 : 0) || a.name.localeCompare(b.name, 'vi', {numeric:true, sensitivity:'base'});
-    });
+    const students = studentsFor(activeClass);
     const week = selectedWeek;
     const visibleIds = new Set(visibleStudents().map(s=>s.id));
     const weekRows = data().history.filter(h => ['team-action','team-violation','team-participation'].includes(h.type) && Number(h.weekNumber||0)===selectedWeek && (app.isAdmin() || classes().includes(h.className))).sort((a,b)=>b.time-a.time);
+    const memberRanking = students.slice().sort((a,b)=>Number(b.score)-Number(a.score));
     const admin = app.isAdmin();
     root.innerHTML = `
       <div class="toolbar" style="margin-bottom:16px;align-items:flex-end">
@@ -95,8 +83,11 @@
         ${teams.length?`<table><thead><tr><th>Hạng</th><th>Tổ</th><th>Lớp</th><th>Số thành viên</th><th>Cách tính</th><th>Điểm tuần</th><th>Điểm cộng</th><th>Điểm trừ</th>${admin?'<th>Sửa</th><th>Xóa</th>':''}</tr></thead><tbody>${teams.map((t,i)=>`<tr><td><strong>${i+1}</strong></td><td>${esc(t.name)}</td><td>${esc(t.className)}</td><td>${teamMembers(t).length}</td><td>${t.mode==='manual'?'Điểm tổ riêng':t.mode==='average'?'Điểm trung bình':'Tổng điểm thành viên'}</td><td><strong>${Number(teamScore(t, selectedWeek).toFixed(2))}</strong> / 100</td><td class="text-success">+${Number(teamBonus(t, selectedWeek).toFixed(2))}</td><td class="text-danger">−${Number(teamPenalty(t, selectedWeek).toFixed(2))}</td>${admin?`<td><button class="btn btn-secondary btn-sm" data-action="team-edit" data-id="${esc(t.id)}">Sửa</button></td><td><button class="btn btn-danger btn-sm" data-action="team-delete" data-id="${esc(t.id)}">Xóa</button></td>`:''}</tr>`).join('')}</tbody></table>`:'<div class="empty"><strong>Chưa có tổ</strong>Admin hãy tạo tổ ở phần phía trên.</div>'}
       </div></div>
       <div class="grid grid-2" style="margin-bottom:16px">
-        <div class="card team-assignment-card" style="grid-column:1 / -1;width:100%;min-width:0"><div class="card-header"><div><h3 class="card-title">Phân học sinh vào tổ</h3><div class="card-subtitle">Nhập số lần phát biểu, sau đó bấm <strong>Cập nhật phát biểu</strong> để lưu.</div></div><button class="btn btn-primary" type="button" data-action="team-save-speech">💾 Cập nhật phát biểu</button></div><div class="table-wrap team-assignment-table-wrap" style="width:100%;max-width:100%;overflow-x:auto">
-          ${students.length?`<table style="width:100%;min-width:900px;table-layout:auto"><thead><tr><th>Học sinh</th><th>Lớp</th><th>Tổ</th><th>Phát biểu Tuần ${selectedWeek}</th></tr></thead><tbody>${students.map(s=>{const opts=teamsFor(s.className);const current=data().teams.find(t=>(t.studentIds||[]).includes(s.id)&&t.className===s.className);const speech=data().history.filter(h=>h.type==='team-participation' && h.studentId===s.id && Number(h.weekNumber||0)===selectedWeek).reduce((n,h)=>n+Math.max(0,Number(h.points)||0),0);return `<tr><td><strong>${esc(s.name)}</strong></td><td>${esc(s.className)}</td><td><select data-action="team-assign" data-student-id="${esc(s.id)}"><option value="">Chưa xếp tổ</option>${opts.map(t=>`<option value="${esc(t.id)}" ${current?.id===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></td><td><input class="team-speech-input" data-action="team-speech" data-student-id="${esc(s.id)}" type="number" min="0" max="100" step="1" value="${speech}" title="1 phát biểu = 1 điểm cho tổ"><span class="muted" style="margin-left:6px">×1 điểm</span></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Chưa có học sinh.</div>'}
+        <div class="card"><div class="card-header"><div><h3 class="card-title">Phân học sinh vào tổ</h3><div class="card-subtitle">Nhập số lần phát biểu, sau đó bấm <strong>Cập nhật phát biểu</strong> để lưu.</div></div><button class="btn btn-primary" type="button" data-action="team-save-speech">💾 Cập nhật phát biểu</button></div><div class="table-wrap">
+          ${students.length?`<table><thead><tr><th>Học sinh</th><th>Lớp</th><th>Tổ</th><th>Phát biểu Tuần ${selectedWeek}</th></tr></thead><tbody>${students.map(s=>{const opts=teamsFor(s.className);const current=data().teams.find(t=>(t.studentIds||[]).includes(s.id)&&t.className===s.className);const speech=data().history.filter(h=>h.type==='team-participation' && h.studentId===s.id && Number(h.weekNumber||0)===selectedWeek).reduce((n,h)=>n+Math.max(0,Number(h.points)||0),0);return `<tr><td><strong>${esc(s.name)}</strong></td><td>${esc(s.className)}</td><td><select data-action="team-assign" data-student-id="${esc(s.id)}"><option value="">Chưa xếp tổ</option>${opts.map(t=>`<option value="${esc(t.id)}" ${current?.id===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></td><td><input class="team-speech-input" data-action="team-speech" data-student-id="${esc(s.id)}" type="number" min="0" max="100" step="1" value="${speech}" title="1 phát biểu = 1 điểm cho tổ"><span class="muted" style="margin-left:6px">×1 điểm</span></td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Chưa có học sinh.</div>'}
+        </div></div>
+        <div class="card"><div class="card-header"><div><h3 class="card-title">Xếp hạng học sinh</h3><div class="card-subtitle">Theo điểm hiện tại trong lớp đã chọn</div></div></div><div class="table-wrap">
+          ${memberRanking.length?`<table><thead><tr><th>Hạng</th><th>Học sinh</th><th>Tổ</th><th>Điểm</th></tr></thead><tbody>${memberRanking.map((s,i)=>{const t=data().teams.find(t=>(t.studentIds||[]).includes(s.id));return `<tr><td>${i+1}</td><td>${esc(s.name)}</td><td>${esc(t?.name||'—')}</td><td><strong>${esc(s.score)}</strong> / ${esc(data().settings.maxScore||10)}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Chưa có học sinh trong lớp.</div>'}
         </div></div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><div><h3 class="card-title">Trừ điểm nhiều học sinh</h3><div class="card-subtitle">Chọn nhiều em, nhập số điểm cần trừ và ghi chú</div></div></div><div class="card-body">
@@ -178,10 +169,8 @@
       const delta=Math.round(points*100)/100; const selectedStudentId=String(fd.get('studentId')||''); const selectedStudent=data().students.find(s=>s.id===selectedStudentId && (t.studentIds||[]).includes(s.id)); const before=teamScore(t,weekNumber); const after=Math.max(0,before+delta);
       if(!window.confirm(`Ghi “${ruleName}” cho ${t.name}: ${delta>0?'+':''}${delta} điểm?\nĐiểm ${before} → ${after}.`))return;
       const teacher=app.isAdmin()?{id:'admin',name:'Admin'}:app.currentTeacher();
-      // Bản ghi thi đua tổ là dữ liệu nguồn để tính điểm tuần, vì vậy luôn phải lưu
-      // kể cả khi tùy chọn nhật ký hoạt động của học sinh đang tắt.
-      data().history.push({id:app.uid('his'),type:'team-action',teamId:t.id,teamName:t.name,studentId:selectedStudent?.id||'',studentName:selectedStudent?.name||'',className:t.className,teacherId:teacher?.id||'admin',teacherName:teacher?.name||'Admin',ruleName,points:delta,note:String(fd.get('note')||'').trim(),weekNumber,time:Date.now()});
-      await persist(); uiState().teamWeek=weekNumber; render(); show(delta < 0 ? `Đã trừ ${Math.abs(delta)} điểm của ${t.name}.` : `Đã cộng ${delta} điểm cho ${t.name}.`); if (delta > 0 && app.celebrate) app.celebrate('team');
+      if(data().settings.logActivity!==false)data().history.push({id:app.uid('his'),type:'team-action',teamId:t.id,teamName:t.name,studentId:selectedStudent?.id||'',studentName:selectedStudent?.name||'',className:t.className,teacherId:teacher?.id||'admin',teacherName:teacher?.name||'Admin',ruleName,points:delta,note:String(fd.get('note')||'').trim(),weekNumber,time:Date.now()});
+      await persist(); uiState().teamWeek=weekNumber; render(); show(data().settings.logActivity!==false?'Đã ghi nhận thi đua cho tổ.':'Đã cập nhật, nhưng nhật ký đang tắt nên bản ghi không được lưu.'); if (delta > 0 && app.celebrate) app.celebrate('team');
     });
     $('#scoreSettingsForm')?.addEventListener('submit',async e=>{
       e.preventDefault();if(!admin)return;const fd=new FormData(e.currentTarget);const min=Number(fd.get('minScore')),max=Number(fd.get('maxScore'));
@@ -244,7 +233,7 @@
       const studentName=window.prompt('Học sinh / người được ghi nhận:',h.studentName||''); if(studentName===null)return true;
       const ruleName=window.prompt('Nội dung:',h.ruleName||''); if(ruleName===null)return true;
       const pointsRaw=window.prompt('Điểm cộng / trừ (ví dụ -50 hoặc +20):',String(teamDelta(h))); if(pointsRaw===null)return true;
-      const points=Number(pointsRaw); if(!Number.isFinite(points)||points===0||Math.abs(points)>100)return show('Điểm phải khác 0 và nằm trong khoảng -100 đến 100.','error');
+      const points=Number(pointsRaw); if(!Number.isFinite(rawPoints)||rawPoints<=0||rawPoints>100)return show('Số điểm phải lớn hơn 0 và không quá 100.','error');
       const weekRaw=window.prompt('Tuần (1-35):',String(h.weekNumber||uiState().teamWeek||1)); if(weekRaw===null)return true;
       const weekNumber=Math.min(35,Math.max(1,Number(weekRaw)||1));
       h.studentName=String(studentName).trim();h.ruleName=String(ruleName).trim();h.points=Math.round(points*100)/100;h.weekNumber=weekNumber;h.time=Date.now();
