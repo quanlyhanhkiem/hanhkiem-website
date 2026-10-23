@@ -426,7 +426,17 @@
     const classes = effectiveClassOptions();
     const classStudents = students.length;
     const maxScore = state.data?.settings?.maxScore ?? 10;
-    const topStudents = students.slice().sort((a,b) => clampScore(b.score) - clampScore(a.score)).slice(0,5);
+    // Top 5 học sinh được xếp theo số lần phát biểu trong tuần đang xem.
+    const speechCounts = new Map();
+    state.data.history.filter(h => h.type === 'team-participation' && Number(h.weekNumber || 0) === selectedWeek)
+      .forEach(h => {
+        const stu = state.data.students.find(s => s.id === h.studentId);
+        if (!stu || !canAccessStudent(stu) || (cls !== 'all' && stu.className !== cls)) return;
+        speechCounts.set(stu.id, (speechCounts.get(stu.id) || 0) + Math.max(0, Number(h.points) || 0));
+      });
+    const topStudents = students.slice()
+      .sort((a,b) => (speechCounts.get(b.id) || 0) - (speechCounts.get(a.id) || 0) || a.name.localeCompare(b.name, 'vi'))
+      .slice(0,5);
     const recent = histories.slice().sort((a,b) => b.time - a.time).slice(0, 5);
 
     // Xếp hạng tổ theo tuần: 100 điểm gốc + điểm cộng/trừ + điểm phát biểu.
@@ -523,7 +533,7 @@
 
           <div class="school-panel">
             <div class="school-panel-head">
-              <div><h3>Top 5 học sinh có điểm cao nhất</h3><p>Danh sách nổi bật trong phạm vi đang xem</p></div>
+              <div><h3>Top 5 học sinh phát biểu nhiều nhất</h3><p>Xếp theo số lần phát biểu trong Tuần ${selectedWeek}</p></div>
               <span class="school-medal">🏆</span>
             </div>
             <div class="top-students">
@@ -532,7 +542,7 @@
                   <span class="student-rank">${i+1}</span>
                   <span class="student-avatar">${escapeHtml(initials(s.name))}</span>
                   <span class="student-name"><strong>${escapeHtml(s.name)}</strong><small>${escapeHtml(s.className)}</small></span>
-                  <span class="student-score">${clampScore(s.score).toFixed(2)} <small>/ ${maxScore}</small></span>
+                  <span class="student-score">${speechCounts.get(s.id) || 0} <small>lần phát biểu</small></span>
                 </button>`).join('') : `<div class="school-empty">Chưa có học sinh.</div>`}
             </div>
           </div>
